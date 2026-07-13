@@ -1,0 +1,2 @@
+# CommonDockerImages
+UniProjectで使うためにカスタマイズされたDockerImageのリポジトリ
