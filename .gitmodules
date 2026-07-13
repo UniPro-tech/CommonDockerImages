@@ -1,0 +1,4 @@
+[submodule "postgres"]
+	path = official/postgres/original
+	url = https://github.com/docker-library/postgres.git
+	branch = master
