@@ -1,18 +1,1 @@
-{
-  "15": {
-    "postgres_version": "15.18",
-    "pg_bigm_version": "1.2-20250903"
-  },
-  "16": {
-    "postgres_version": "16.14",
-    "pg_bigm_version": "1.2-20250903"
-  },
-  "17": {
-    "postgres_version": "17.10",
-    "pg_bigm_version": "1.2-20250903"
-  },
-  "18": {
-    "postgres_version": "18.4",
-    "pg_bigm_version": "1.2-20250903"
-  }
-}
+{}
