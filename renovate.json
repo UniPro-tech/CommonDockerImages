@@ -1,4 +1,5 @@
 {
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended",
     ":enableVulnerabilityAlertsWithLabel(security)",
@@ -22,6 +23,9 @@
   ],
   "labels": ["kind/dependency-update"],
   "prConcurrentLimit": 5,
+  "dockerfile": {
+    "enabled": false
+  },
   "minimumReleaseAge": "1 day",
   "internalChecksFilter": "strict"
 }
