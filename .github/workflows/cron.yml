@@ -1,4 +1,4 @@
-name: Scheduled Build and Push
+name: Autometically Update
 
 on:
   schedule:
