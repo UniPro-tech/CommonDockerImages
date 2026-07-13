@@ -1,6 +1,27 @@
 {
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "local>UniPro-tech/renovate-config"
-  ]
+    "config:recommended",
+    ":enableVulnerabilityAlertsWithLabel(security)",
+    "helpers:pinGitHubActionDigests",
+    "github>unipro-tech/renovate-config//auto-patch.json",
+    "github>unipro-tech/renovate-config//labels/semver/digest.json",
+    "github>unipro-tech/renovate-config//labels/semver/pinDigest.json",
+    "github>unipro-tech/renovate-config//labels/semver/lock.json",
+    "github>unipro-tech/renovate-config//labels/semver/major.json",
+    "github>unipro-tech/renovate-config//labels/semver/minor.json",
+    "github>unipro-tech/renovate-config//labels/semver/patch.json",
+    "github>unipro-tech/renovate-config//labels/versionFile/go.json",
+    "github>unipro-tech/renovate-config//labels/versionFile/js.json",
+    "github>unipro-tech/renovate-config//labels/versionFile/python.json",
+    "github>unipro-tech/renovate-config//labels/versionFile/rust.json",
+    "github>unipro-tech/renovate-config//labels/versionFile/gh-actions.json",
+    "github>unipro-tech/renovate-config//labels/versionFile/kubernetes.json",
+    "github>unipro-tech/renovate-config//groups/js-linter.json",
+    "github>unipro-tech/renovate-config//groups/react.json",
+    "github>unipro-tech/renovate-config//groups/pydantic.json"
+  ],
+  "labels": ["kind/dependency-update"],
+  "prConcurrentLimit": 5,
+  "minimumReleaseAge": "1 day",
+  "internalChecksFilter": "strict"
 }
