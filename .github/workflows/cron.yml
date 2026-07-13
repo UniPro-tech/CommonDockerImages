@@ -13,6 +13,13 @@ jobs:
       packages: write
 
     steps:
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -40,11 +47,39 @@ jobs:
         id: check
         run: python scripts/check_updates.py
 
-      - name: Commit and Push changes
+      - name: Commit and Push changes via GitHub API
         if: steps.check.outputs.updated == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add .
-          git commit -m "chore: auto-update postgres and pg_bigm [skip ci]"
-          git push
+          # 変更されたファイルの内容をBase64エンコード
+          DOCKERFILE_BASE64=$(base64 -w 0 official/postgres/Dockerfile)
+          STATE_BASE64=$(base64 -w 0 state/postgres.json)
+
+          # GraphQLのcreateCommitOnBranchを使ってAPI経由で一括コミット＆プッシュ
+          gh api graphql \
+            -F repositoryWithOwner="${{ github.repository }}" \
+            -F branchName="${{ github.ref_name }}" \
+            -F expectedHeadOid="$(git rev-parse HEAD)" \
+            -F dockerfileContent="$DOCKERFILE_BASE64" \
+            -F stateContent="$STATE_BASE64" \
+            -f query='
+              mutation($repositoryWithOwner: String!, $branchName: String!, $expectedHeadOid: GitObjectID!, $dockerfileContent: Base64String!, $stateContent: Base64String!) {
+                createCommitOnBranch(input: {
+                  branch: {
+                    repositoryNameWithOwner: $repositoryWithOwner,
+                    branchName: $branchName
+                  },
+                  expectedHeadOid: $expectedHeadOid,
+                  message: { headline: "chore: auto-update postgres and pg_bigm [skip ci]" },
+                  fileChanges: {
+                    additions: [
+                      { path: "official/postgres/Dockerfile", contents: $dockerfileContent },
+                      { path: "state/postgres.json", contents: $stateContent }
+                    ]
+                  }
+                }) {
+                  commit { url }
+                }
+              }
+            '
