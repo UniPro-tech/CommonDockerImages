@@ -13,7 +13,7 @@ def main():
     bigm_version = sys.argv[3]
 
     repo_owner = os.environ.get("GITHUB_REPOSITORY_OWNER", "your_username").lower()
-    image_name = f"ghcr.io/{repo_owner}/postgres-pg-bigm"
+    image_name = f"ghcr.io/{repo_owner}/postgres"
 
     # 常に最新のメジャーバージョンに更新されるタグと、詳細な固定バージョンのタグを生成
     tags = [f"{image_name}:{major}", f"{image_name}:{pg_version}-bigm{bigm_version}"]
