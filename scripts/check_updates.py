@@ -24,7 +24,7 @@ def compare_versions(v1, v2):
 
 def get_target_postgres_versions():
     """15以上のメジャーバージョンごとの最新マイナーバージョンを取得"""
-    url = "https://hub.docker.com/v2/repositories/library/postgres/tags/?page_size=100"
+    url = "https://hub.docker.com/v2/repositories/library/postgres/tags/?page_size=15"
     versions = {}
 
     while url:
