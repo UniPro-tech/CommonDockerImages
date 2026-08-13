@@ -4,6 +4,21 @@ import subprocess
 from pathlib import Path
 
 
+def run(
+    command: list[str],
+) -> None:
+    print(
+        "$",
+        " ".join(command),
+        flush=True,
+    )
+
+    subprocess.run(
+        command,
+        check=True,
+    )
+
+
 def build_and_push(
     *,
     dockerfile: Path,
@@ -14,10 +29,8 @@ def build_and_push(
     command = [
         "docker",
         "build",
-        "-f",
+        "--file",
         str(dockerfile),
-        "-t",
-        image,
     ]
 
     for key, value in build_args.items():
@@ -28,38 +41,42 @@ def build_and_push(
             ]
         )
 
-    command.append(str(context))
+    command.extend(
+        [
+            "--tag",
+            image,
+            str(context),
+        ]
+    )
 
-    print("Running:", " ".join(command))
+    run(command)
 
-    subprocess.run(command, check=True)
-
-    subprocess.run(
+    run(
         [
             "docker",
             "push",
             image,
-        ],
-        check=True,
+        ]
     )
 
 
-def push_tag(source_image: str, target_image: str) -> None:
-    subprocess.run(
+def tag_and_push(
+    source: str,
+    target: str,
+) -> None:
+    run(
         [
             "docker",
             "tag",
-            source_image,
-            target_image,
-        ],
-        check=True,
+            source,
+            target,
+        ]
     )
 
-    subprocess.run(
+    run(
         [
             "docker",
             "push",
-            target_image,
-        ],
-        check=True,
+            target,
+        ]
     )

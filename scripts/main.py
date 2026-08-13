@@ -2,202 +2,313 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
+from pathlib import Path
 
 from config import (
+    ImageConfig,
     expand_template,
     load_configs,
-    version_matches,
 )
-from docker import build_and_push, push_tag
-from registry import login_ghcr
-from sources.dockerhub import get_tags
-from sources.github import get_release_tags
-from state import load_state, save_state
+from docker import build_and_push
+from sources.dockerhub import (
+    get_latest_matching_tag,
+    get_tags,
+)
+from sources.github import (
+    get_latest_release_tag,
+)
+from state import (
+    load_state,
+    save_state,
+)
 
 
-def version_key(version: str) -> tuple[int, ...]:
-    parts = re.findall(r"\d+", version)
+def login_ghcr() -> None:
+    registry = "ghcr.io"
 
-    return tuple(int(part) for part in parts)
+    username = os.environ.get("GHCR_USERNAME")
+
+    token = os.environ.get("GHCR_TOKEN")
+
+    if not username:
+        username = os.environ.get("GITHUB_ACTOR")
+
+    if not token:
+        token = os.environ.get("GITHUB_TOKEN")
+
+    if not username:
+        raise RuntimeError("GHCR_USERNAME or GITHUB_ACTOR is required")
+
+    if not token:
+        raise RuntimeError("GHCR_TOKEN or GITHUB_TOKEN is required")
+
+    subprocess.run(
+        [
+            "docker",
+            "login",
+            registry,
+            "--username",
+            username,
+            "--password-stdin",
+        ],
+        input=token,
+        text=True,
+        check=True,
+    )
 
 
-def get_latest_version(
-    tags: list[str],
-    pattern: str,
-    minimum_major: int | None = None,
-) -> str | None:
-    versions = [
-        tag
-        for tag in tags
-        if version_matches(
-            pattern,
-            tag,
-            minimum_major,
+def is_force_build() -> bool:
+    value = os.environ.get(
+        "FORCE_BUILD",
+        "",
+    ).lower()
+
+    return value in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def set_github_output(
+    updated: bool,
+) -> None:
+    output = os.environ.get("GITHUB_OUTPUT")
+
+    if not output:
+        return
+
+    with open(
+        output,
+        "a",
+        encoding="utf-8",
+    ) as f:
+        f.write(f"updated={'true' if updated else 'false'}\n")
+
+
+def version_key(
+    value: str,
+):
+    return tuple(int(x) for x in value.split(".") if x.isdigit())
+
+
+def resolve_plugins(
+    config: ImageConfig,
+) -> dict[str, str]:
+    result: dict[str, str] = {}
+
+    for plugin in config.plugins:
+        if plugin.source_type != "github_release":
+            raise ValueError(f"Unsupported plugin source: {plugin.source_type}")
+
+        latest = get_latest_release_tag(
+            plugin.source_repository,
+            plugin.version_pattern,
         )
-    ]
 
-    if not versions:
-        return None
+        if latest is None:
+            raise RuntimeError(
+                f"No matching release found for {plugin.source_repository}"
+            )
 
-    return max(
-        versions,
-        key=version_key,
-    )
+        result[plugin.name] = latest
 
-
-def get_plugin_versions(plugin):
-    if plugin.source_type == "github_release":
-        return get_release_tags(plugin.source_repository)
-
-    raise RuntimeError(f"Unsupported plugin source: {plugin.source_type}")
+    return result
 
 
-def get_latest_plugin_version(plugin):
-    tags = get_plugin_versions(plugin)
-
-    return get_latest_version(
-        tags,
-        plugin.version_pattern,
-    )
-
-
-def process_postgres(config) -> bool:
-    print()
+def process_postgres(
+    config: ImageConfig,
+) -> bool:
     print("=" * 70)
     print("Checking PostgreSQL")
     print("=" * 70)
 
-    tags = get_tags(config.source_repository)
-
-    postgres_versions = [
-        tag
-        for tag in tags
-        if version_matches(
-            config.version_pattern,
-            tag,
-            config.minimum_major,
-        )
-    ]
-
-    postgres_versions.sort(key=version_key)
-
     state = load_state(config.name)
 
-    updated = False
+    force = is_force_build()
 
-    pg_bigm_version = None
+    # ------------------------------------------------------------
+    # PostgreSQL major versions
+    # ------------------------------------------------------------
 
-    for plugin in config.plugins:
-        pg_bigm_version = get_latest_plugin_version(plugin)
+    current_versions = state.get("versions", {})
 
-        print(f"{plugin.name}: {pg_bigm_version}")
+    # image.yaml の minimum_major から対象majorを決める。
+    #
+    # 現在のPostgreSQL対応範囲は15〜18。
+    #
+    # 将来18以上が出た場合もDocker Hub側に存在すれば
+    # 自動的に拾えるようにする。
+    tags = get_tags(
+        config.source_repository,
+        max_pages=5,
+    )
 
-    if pg_bigm_version is None:
-        raise RuntimeError("pg_bigm version was not found")
+    major_versions: dict[str, str] = {}
 
-    for pg_version in postgres_versions:
-        major = pg_version.split(".")[0]
+    pattern = re.compile(config.version_pattern)
 
-        current = state.get(major, {})
+    for tag in tags:
+        if not pattern.fullmatch(tag):
+            continue
 
-        current_pg = current.get("postgres_version")
+        try:
+            major = int(tag.split(".")[0])
+        except ValueError:
+            continue
 
-        current_bigm = current.get("pg_bigm_version")
+        if config.minimum_major is not None and major < config.minimum_major:
+            continue
 
-        print(f"PostgreSQL {major}: {current_pg} -> {pg_version}")
+        if major not in major_versions or version_key(tag) > version_key(
+            major_versions[major]
+        ):
+            major_versions[major] = tag
 
-        print(f"pg_bigm: {current_bigm} -> {pg_bigm_version}")
+    if not major_versions:
+        raise RuntimeError("No PostgreSQL versions found")
 
-        if current_pg == pg_version and current_bigm == pg_bigm_version:
+    # ------------------------------------------------------------
+    # pg_bigm
+    # ------------------------------------------------------------
+
+    plugin_versions = resolve_plugins(config)
+
+    pg_bigm_version = plugin_versions.get("pg_bigm")
+
+    if not pg_bigm_version:
+        raise RuntimeError("pg_bigm version was not resolved")
+
+    changed = False
+
+    for major in sorted(
+        major_versions,
+        key=int,
+    ):
+        postgres_version = major_versions[major]
+
+        previous = current_versions.get(major, {})
+
+        previous_postgres = previous.get("postgres_version")
+
+        previous_bigm = previous.get("pg_bigm_version")
+
+        needs_build = (
+            force
+            or previous_postgres != postgres_version
+            or previous_bigm != pg_bigm_version
+        )
+
+        print(f"PostgreSQL {major}: {previous_postgres} -> {postgres_version}")
+
+        print(f"pg_bigm: {previous_bigm} -> {pg_bigm_version}")
+
+        if not needs_build:
             print("No update.")
             continue
 
-        print(f"Building PostgreSQL {pg_version}")
+        print("Build required.")
 
         build_args = {
-            "PG_VERSION": pg_version,
-            "PG_MAJOR": major,
+            "PG_VERSION": postgres_version,
             "PG_BIGM_VERSION": pg_bigm_version,
         }
 
-        local_image = f"{config.target_repository}:{pg_version}"
+        image = (
+            f"{config.target_registry}/{config.target_repository}:{postgres_version}"
+        )
 
         build_and_push(
             dockerfile=config.dockerfile,
             context=config.dockerfile.parent,
-            image=local_image,
+            image=image,
             build_args=build_args,
         )
 
-        for tag_template in config.tags:
-            tag = expand_template(
-                tag_template,
-                pg_version,
-            )
-
-            target_image = f"{config.target_registry}/{config.target_repository}:{tag}"
-
-            if target_image != local_image:
-                push_tag(
-                    local_image,
-                    target_image,
-                )
-
-        state[major] = {
-            "postgres_version": pg_version,
+        current_versions[major] = {
+            "postgres_version": postgres_version,
             "pg_bigm_version": pg_bigm_version,
         }
 
-        updated = True
+        changed = True
 
-    save_state(
-        config.name,
-        state,
-    )
+    if changed:
+        state["versions"] = current_versions
 
-    return updated
+        state["latest"] = max(
+            major_versions.values(),
+            key=version_key,
+        )
+
+        save_state(
+            config.name,
+            state,
+        )
+
+    return changed
 
 
-def process_generic_image(config) -> bool:
-    print()
+def process_seafile(
+    config: ImageConfig,
+) -> bool:
     print("=" * 70)
-    print(f"Checking {config.name}")
+    print("Checking Seafile")
     print("=" * 70)
 
-    tags = get_tags(config.source_repository)
+    state = load_state(config.name)
 
-    latest = get_latest_version(
-        tags,
+    force = is_force_build()
+
+    latest = get_latest_matching_tag(
+        config.source_repository,
         config.version_pattern,
-        config.minimum_major,
+        max_pages=5,
     )
 
     if latest is None:
-        print("No matching version found.")
-        return False
-
-    state = load_state(config.name)
+        raise RuntimeError("No matching Seafile version found")
 
     current = state.get("version")
 
     print(f"Current: {current}")
 
-    print(f"Latest: {latest}")
+    print(f"Latest:  {latest}")
 
-    if current == latest:
+    needs_build = force or current != latest
+
+    if not needs_build:
         print("No update.")
+
         return False
 
-    build_args = {"VERSION": latest}
+    print("Build required.")
 
-    local_image = f"{config.target_repository}:{latest}"
+    build_args = {}
+
+    for key, value in config.build_args.items():
+        build_args[key] = expand_template(
+            value,
+            latest,
+        )
+
+    # ------------------------------------------------------------
+    # メインタグ
+    # ------------------------------------------------------------
+
+    main_image = f"{config.target_registry}/{config.target_repository}:{latest}"
 
     build_and_push(
         dockerfile=config.dockerfile,
         context=config.dockerfile.parent,
-        image=local_image,
+        image=main_image,
         build_args=build_args,
     )
+
+    # ------------------------------------------------------------
+    # 追加タグ
+    # ------------------------------------------------------------
 
     for tag_template in config.tags:
         tag = expand_template(
@@ -205,13 +316,32 @@ def process_generic_image(config) -> bool:
             latest,
         )
 
-        target_image = f"{config.target_registry}/{config.target_repository}:{tag}"
+        # {version} はmain_imageと同じなのでスキップ
+        if tag == latest:
+            continue
 
-        if target_image != local_image:
-            push_tag(
-                local_image,
-                target_image,
-            )
+        target = f"{config.target_registry}/{config.target_repository}:{tag}"
+
+        print(f"Adding tag: {target}")
+
+        subprocess.run(
+            [
+                "docker",
+                "tag",
+                main_image,
+                target,
+            ],
+            check=True,
+        )
+
+        subprocess.run(
+            [
+                "docker",
+                "push",
+                target,
+            ],
+            check=True,
+        )
 
     state["version"] = latest
 
@@ -223,27 +353,103 @@ def process_generic_image(config) -> bool:
     return True
 
 
-def main():
+def process_generic(
+    config: ImageConfig,
+) -> bool:
+    print("=" * 70)
+    print(f"Checking {config.name}")
+    print("=" * 70)
+
+    state = load_state(config.name)
+
+    force = is_force_build()
+
+    latest = get_latest_matching_tag(
+        config.source_repository,
+        config.version_pattern,
+        minimum_major=config.minimum_major,
+        max_pages=5,
+    )
+
+    if latest is None:
+        raise RuntimeError(f"No matching version found for {config.name}")
+
+    current = state.get("version")
+
+    print(f"Current: {current}")
+
+    print(f"Latest: {latest}")
+
+    if not force and current == latest:
+        print("No update.")
+
+        return False
+
+    build_args = {}
+
+    for key, value in config.build_args.items():
+        build_args[key] = expand_template(
+            value,
+            latest,
+        )
+
+    image = f"{config.target_registry}/{config.target_repository}:{latest}"
+
+    build_and_push(
+        dockerfile=config.dockerfile,
+        context=config.dockerfile.parent,
+        image=image,
+        build_args=build_args,
+    )
+
+    state["version"] = latest
+
+    save_state(
+        config.name,
+        state,
+    )
+
+    return True
+
+
+def process(
+    config: ImageConfig,
+) -> bool:
+    if config.name == "postgres":
+        return process_postgres(config)
+
+    if config.name == "seafile":
+        return process_seafile(config)
+
+    return process_generic(config)
+
+
+def main() -> None:
     login_ghcr()
 
     configs = load_configs()
 
+    print(f"Loaded {len(configs)} image configuration(s)")
+
+    for config in configs:
+        print(f"  - {config.name}")
+
     updated = False
 
     for config in configs:
-        if config.name == "postgres":
-            changed = process_postgres(config)
-        else:
-            changed = process_generic_image(config)
+        changed = process(config)
 
         if changed:
             updated = True
 
-    output = os.environ.get("GITHUB_OUTPUT")
+    set_github_output(updated)
 
-    if output:
-        with open(output, "a") as f:
-            f.write("updated=" + ("true" if updated else "false") + "\n")
+    print("=" * 70)
+
+    if updated:
+        print("Updates were built and pushed.")
+    else:
+        print("No updates.")
 
 
 if __name__ == "__main__":

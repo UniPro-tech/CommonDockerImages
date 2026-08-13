@@ -44,13 +44,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update images
-        id: update
+      - name: Check updates, Build and Push
+        id: check
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
-        run: |
-          python scripts/main.py
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/main.py
 
       - name: Commit changes
         if: steps.update.outputs.updated == 'true'

@@ -1,39 +1,71 @@
 from __future__ import annotations
 
+import re
+
 import requests
 
 
-GITHUB_API = "https://api.github.com"
+SESSION = requests.Session()
 
-
-def get_release_tags(repository: str) -> list[str]:
-    url = f"{GITHUB_API}/repos/{repository}/releases"
-
-    params = {
-        "per_page": 100,
+SESSION.headers.update(
+    {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "CommonDockerImages/1.0",
     }
+)
 
-    tags = []
 
-    while url:
-        response = requests.get(
-            url,
-            params=params,
-            timeout=30,
-        )
-        response.raise_for_status()
+def get_latest_release_tag(
+    repository: str,
+    pattern: str,
+) -> str | None:
+    """
+    GitHub Releasesから最新版を取得する。
+    """
 
-        releases = response.json()
+    url = f"https://api.github.com/repos/{repository}/releases"
 
-        for release in releases:
-            tag = release.get("tag_name")
+    response = SESSION.get(
+        url,
+        params={
+            "per_page": 100,
+        },
+        timeout=30,
+    )
 
-            if tag:
-                tags.append(tag.lstrip("v"))
+    response.raise_for_status()
 
-        if len(releases) < 100:
-            break
+    releases = response.json()
 
-        params["page"] = params.get("page", 1) + 1
+    regex = re.compile(pattern)
 
-    return tags
+    versions = []
+
+    for release in releases:
+        if release.get("draft"):
+            continue
+
+        if release.get("prerelease"):
+            continue
+
+        tag = release.get("tag_name")
+
+        if not tag:
+            continue
+
+        tag = tag.lstrip("v")
+
+        if regex.fullmatch(tag):
+            versions.append(tag)
+
+    if not versions:
+        return None
+
+    return max(
+        versions,
+        key=_version_key,
+    )
+
+
+def _version_key(value: str):
+    return tuple(int(x) for x in value.split("."))

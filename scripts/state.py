@@ -6,33 +6,45 @@ from pathlib import Path
 from config import STATE_DIR
 
 
-def state_path(image_name: str) -> Path:
-    return STATE_DIR / f"{image_name}.json"
+def _state_path(name: str) -> Path:
+    return STATE_DIR / f"{name}.json"
 
 
-def load_state(image_name: str) -> dict:
-    path = state_path(image_name)
+def load_state(name: str) -> dict:
+    path = _state_path(name)
 
     if not path.exists():
         return {}
 
-    with path.open() as f:
-        return json.load(f)
+    with path.open(encoding="utf-8") as f:
+        data = json.load(f)
+
+    if not isinstance(data, dict):
+        return {}
+
+    return data
 
 
-def save_state(image_name: str, state: dict) -> None:
-    path = state_path(image_name)
-
-    path.parent.mkdir(
+def save_state(
+    name: str,
+    data: dict,
+) -> None:
+    STATE_DIR.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    with path.open("w") as f:
+    path = _state_path(name)
+
+    with path.open(
+        "w",
+        encoding="utf-8",
+    ) as f:
         json.dump(
-            state,
+            data,
             f,
             indent=2,
-            sort_keys=True,
+            ensure_ascii=False,
         )
+
         f.write("\n")
