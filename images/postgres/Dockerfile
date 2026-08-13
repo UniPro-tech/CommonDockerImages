@@ -11,7 +11,7 @@ RUN apt-get update \
   libicu-dev \
   wget \
   && wget -O /tmp/pg_bigm.tar.gz \
-  "https://github.com/pgbigm/pg_bigm/archive/refs/tags/v${PG_BIGM_VERSION}.tar.gz" \
+  "https://github.com/pgbigm/pg_bigm/archive/refs/tags/${PG_BIGM_VERSION}.tar.gz" \
   && tar -xzf /tmp/pg_bigm.tar.gz \
   -C /tmp \
   && cd "/tmp/pg_bigm-${PG_BIGM_VERSION}" \

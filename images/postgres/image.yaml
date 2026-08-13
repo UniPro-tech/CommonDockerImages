@@ -19,7 +19,7 @@ plugins:
       repository: pgbigm/pg_bigm
 
     version:
-      pattern: "^\\d+\\.\\d+$"
+      pattern: "^v\\d+\\.\\d+\\.\\d+$"
 
 build:
   dockerfile: Dockerfile
