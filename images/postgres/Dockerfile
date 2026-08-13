@@ -1,8 +1,8 @@
-FROM postgres:${PG_VERSION}
-
 ARG PG_VERSION
 ARG PG_MAJOR
 ARG PG_BIGM_VERSION
+
+FROM postgres:${PG_VERSION}
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
