@@ -1,18 +1,38 @@
+from __future__ import annotations
+
 import json
-import os
+from pathlib import Path
 
-STATE_FILE = os.path.join(os.path.dirname(__file__), "..", "state", "postgres.json")
+from config import STATE_DIR
 
 
-def load_state():
-    if not os.path.exists(STATE_FILE):
-        return {"postgres_version": "", "pg_bigm_version": ""}
-    with open(STATE_FILE, "r") as f:
+def state_path(image_name: str) -> Path:
+    return STATE_DIR / f"{image_name}.json"
+
+
+def load_state(image_name: str) -> dict:
+    path = state_path(image_name)
+
+    if not path.exists():
+        return {}
+
+    with path.open() as f:
         return json.load(f)
 
 
-def save_state(state):
-    # ディレクトリが存在しない場合は作成
-    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=2)
+def save_state(image_name: str, state: dict) -> None:
+    path = state_path(image_name)
+
+    path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    with path.open("w") as f:
+        json.dump(
+            state,
+            f,
+            indent=2,
+            sort_keys=True,
+        )
+        f.write("\n")

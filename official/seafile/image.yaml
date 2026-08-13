@@ -1,0 +1,21 @@
+name: seafile
+
+source:
+  type: dockerhub
+  repository: seafileltd/seafile-mc
+
+target:
+  registry: ghcr.io
+  repository: unipro-tech/seafile-mc
+
+version:
+  pattern: "^13\\.0\\.\\d+$"
+
+build:
+  dockerfile: Dockerfile
+  args:
+    SEAFILE_VERSION: "{version}"
+
+tags:
+  - "{version}"
+  - "13.0"

@@ -1,0 +1,28 @@
+name: postgres
+
+source:
+  type: dockerhub
+  repository: library/postgres
+
+target:
+  registry: ghcr.io
+  repository: unipro-tech/postgres
+
+versions:
+  pattern: "^\\d+\\.\\d+$"
+  minimum_major: 15
+
+plugins:
+  - name: pg_bigm
+    source:
+      type: github_release
+      repository: pgbigm/pg_bigm
+
+    version:
+      pattern: "^\\d+\\.\\d+$"
+
+build:
+  dockerfile: Dockerfile
+
+tags:
+  - "{version}"
