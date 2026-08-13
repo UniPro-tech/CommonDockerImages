@@ -58,6 +58,10 @@ def load_configs() -> list[ImageConfig]:
         target = data["target"]
         build = data["build"]
 
+        # --------------------------------------------------------
+        # version / versions の両方に対応
+        # --------------------------------------------------------
+
         version_config = data.get("versions")
 
         if version_config is None:
@@ -66,13 +70,26 @@ def load_configs() -> list[ImageConfig]:
         if version_config is None:
             raise ValueError(f"{path}: either 'version' or 'versions' is required")
 
+        if not isinstance(
+            version_config,
+            dict,
+        ):
+            raise ValueError(f"{path}: 'version' must be a mapping")
+
         version_pattern = version_config["pattern"]
 
         minimum_major = version_config.get("minimum_major")
 
+        # --------------------------------------------------------
+        # Plugins
+        # --------------------------------------------------------
+
         plugins: list[PluginConfig] = []
 
-        for plugin in data.get("plugins", []):
+        for plugin in data.get(
+            "plugins",
+            [],
+        ):
             plugin_source = plugin["source"]
             plugin_version = plugin["version"]
 
@@ -85,6 +102,21 @@ def load_configs() -> list[ImageConfig]:
                 )
             )
 
+        # --------------------------------------------------------
+        # Build args
+        # --------------------------------------------------------
+
+        build_args = dict(
+            build.get(
+                "args",
+                {},
+            )
+        )
+
+        # --------------------------------------------------------
+        # ImageConfig
+        # --------------------------------------------------------
+
         configs.append(
             ImageConfig(
                 name=data["name"],
@@ -95,10 +127,38 @@ def load_configs() -> list[ImageConfig]:
                 version_pattern=version_pattern,
                 minimum_major=minimum_major,
                 dockerfile=path.parent / build["dockerfile"],
-                build_args=dict(build.get("args", {})),
-                tags=list(data.get("tags", [])),
+                build_args=build_args,
+                tags=list(
+                    data.get(
+                        "tags",
+                        [],
+                    )
+                ),
                 plugins=plugins,
             )
         )
 
     return configs
+
+
+def expand_template(
+    value: str,
+    version: str,
+) -> str:
+    """
+    '{version}' を実際のバージョンに置換する。
+
+    例:
+
+        expand_template(
+            "ghcr.io/example/app:{version}",
+            "13.0.25",
+        )
+
+        -> "ghcr.io/example/app:13.0.25"
+    """
+
+    return value.replace(
+        "{version}",
+        version,
+    )
